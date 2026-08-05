@@ -2,15 +2,15 @@
   <h1>downloadcc</h1>
   <p><strong>Terminal-based Media Downloader with Wireless VLC Transfer</strong></p>
 
-  [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
-  [![CI](https://github.com/IamOumarIbrahim/movies-shows-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/IamOumarIbrahim/movies-shows-downloader/actions/workflows/ci.yml)
+  <p>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white" alt="Python" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License: MIT" /></a>
+    <a href="https://libtorrent.org/"><img src="https://img.shields.io/badge/Engine-libtorrent-brightgreen.svg?style=flat-square" alt="libtorrent" /></a>
+  </p>
 
-  <br />
-  [![libtorrent](https://img.shields.io/badge/Engine-libtorrent-brightgreen.svg?style=flat-square)](https://libtorrent.org/)
-
-  <br /><br />
-  <img src="demo.gif" alt="downloadcc Demo" width="100%" />
+  <p>
+    <img src="demo.gif" alt="downloadcc Demo" width="100%" />
+  </p>
 </div>
 
 downloadcc is a fully interactive terminal-based media downloader that searches movies and TV shows, selects seasons and episodes, downloads via native `libtorrent`, and wirelessly pushes files to VLC on iPad/iPhone.
