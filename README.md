@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>📺 downloadcc</h1>
+  <h1>downloadcc</h1>
   <p><strong>Terminal-based Media Downloader with Wireless VLC Transfer</strong></p>
 
   [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
@@ -8,28 +8,31 @@
 
   <br />
   [![libtorrent](https://img.shields.io/badge/Engine-libtorrent-brightgreen.svg?style=flat-square)](https://libtorrent.org/)
+
+  <br /><br />
+  <img src="demo.gif" alt="downloadcc Demo" width="100%" />
 </div>
 
 downloadcc is a fully interactive terminal-based media downloader that searches movies and TV shows, selects seasons and episodes, downloads via native `libtorrent`, and wirelessly pushes files to VLC on iPad/iPhone.
 
 <br />
 
-## 📖 Table of Contents
-- [What is downloadcc?](#-what-is-downloadcc)
-- [Key Features](#-key-features)
-- [System Architecture](#-system-architecture)
-- [Setup & Installation](#-setup--installation)
-- [How to Use](#-how-to-use)
-- [Reference Tables](#-reference-tables)
-- [Scope & Limitations](#-scope--limitations)
-- [File Structure](#-file-structure)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
+## Table of Contents
+- [What is downloadcc?](#what-is-downloadcc)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Setup & Installation](#setup--installation)
+- [How to Use](#how-to-use)
+- [Reference Tables](#reference-tables)
+- [Scope & Limitations](#scope--limitations)
+- [File Structure](#file-structure)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## 💡 What is downloadcc?
+## What is downloadcc?
 
 Instead of manual torrenting and tedious file transfers via cables or cloud drives, downloadcc automates the process:
 - **100% Terminal-Based CLI**: Numbered interactive selection menus without the need for arrow keys or a GUI.
@@ -38,18 +41,18 @@ Instead of manual torrenting and tedious file transfers via cables or cloud driv
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-- 🎥 **Strict Title Matching**: Custom regex validation ensures search results exactly match your target title, eliminating false positives.
-- 📱 **iPad/iPhone-Compatible Video Profiles**: Results rank H.264/.mp4 streams highest and deprioritize HEVC/x265, AV1, and 10-bit formats for guaranteed out-of-the-box playback on iOS.
-- ⚡ **High-Speed Peer Discovery**: DHT, Local Service Discovery (LSD), UPnP, and NAT-PMP all enabled for maximum torrent connectivity.
-- 📂 **Automatic Post-Processing**: Organizes downloads into season subfolders and renames files to the clean S_XX_E_YY.ext convention automatically.
-- 🔄 **Smart Retry for Failed Uploads**: Re-upload only the files that failed in the last batch.
-- ⏳ **Persistent Background Queue**: Download multiple shows/movies sequentially with live progress, automatic resume, and self-healing torrent switching.
+- **Strict Title Matching**: Custom regex validation ensures search results exactly match your target title, eliminating false positives.
+- **iPad/iPhone-Compatible Video Profiles**: Results rank H.264/.mp4 streams highest and deprioritize HEVC/x265, AV1, and 10-bit formats for guaranteed out-of-the-box playback on iOS.
+- **High-Speed Peer Discovery**: DHT, Local Service Discovery (LSD), UPnP, and NAT-PMP all enabled for maximum torrent connectivity.
+- **Automatic Post-Processing**: Organizes downloads into season subfolders and renames files to the clean S_XX_E_YY.ext convention automatically.
+- **Smart Retry for Failed Uploads**: Re-upload only the files that failed in the last batch.
+- **Persistent Background Queue**: Download multiple shows/movies sequentially with live progress, automatic resume, and self-healing torrent switching.
 
 ---
 
-## ⚙️ System Architecture
+## System Architecture
 
 Data flow from user command line input through torrent download processing stages to wireless device output.
 
@@ -86,7 +89,7 @@ graph TD
 
 ---
 
-## 🚀 Setup & Installation
+## Setup & Installation
 
 ### Option A: 1-Click Setup (Windows)
 ```cmd
@@ -103,7 +106,7 @@ cd movies-shows-downloader
 pip install requests beautifulsoup4 libtorrent pyinstaller
 ```
 
-🔍 **Verification Command**:
+**Verification Command**:
 ```bash
 python --version
 ```
@@ -111,7 +114,7 @@ python --version
 
 ---
 
-## 🖥️ How to Use
+## How to Use
 
 1. Run the downloader by typing `python downloadcc.py "Movie or Show Name"`.
 2. Select a result by typing its corresponding number and pressing Enter.
@@ -124,7 +127,7 @@ python downloadcc.py "Mr. Robot"
 
 ---
 
-## 📊 Reference Tables
+## Reference Tables
 
 ### Configuration Schema (`~/.downloadcc/config.json`)
 
@@ -135,19 +138,20 @@ python downloadcc.py "Mr. Robot"
 
 ---
 
-## 🔬 Scope & Limitations
+## Scope & Limitations
 
 - **iOS Format Prioritization**: Specifically optimizes for H.264 formats which might deprioritize higher quality HEVC/4K rips.
 - **Network Dependency**: Requires local WiFi network connectivity to the iOS device for VLC transfers.
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 downloadcc/
 ├── downloadcc.py                - Main interactive CLI entry point
 ├── search_engine.py             - TVmaze API + torrent indexer crawling engine
+├── demo.gif                     - Demo preview animation
 ├── installer.iss                - Inno Setup compiler configuration
 ├── MoviesAndShowsInstaller.exe  - Compiled standalone Windows installer
 ├── LICENSE                      - MIT License text
@@ -156,7 +160,7 @@ downloadcc/
 
 ---
 
-## 🩹 Troubleshooting
+## Troubleshooting
 
 | Issue | Root Cause | Resolution |
 | :--- | :--- | :--- |
@@ -165,20 +169,20 @@ downloadcc/
 
 ---
 
-## 🧩 Contributing
+## Contributing
 
 The easiest way to contribute is by adding new torrent indexers to `search_engine.py`. Simply implement a new scraper function and append its results to the main search pool.
 
 ---
 
-## 📄 License
+## License
 MIT License © 2024 [IamOumarIbrahim](https://github.com/IamOumarIbrahim)
 
-## 🙏 Powered By
+## Powered By
 [libtorrent](https://libtorrent.org/) · [TVmaze](https://www.tvmaze.com/api)
 
 <div align="center">
 
-If downloadcc solved your media downloading and transferring needs, a ⭐ helps other people find it.
+If downloadcc solved your media downloading and transferring needs, a star helps other people find it.
 
 </div>
