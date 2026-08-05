@@ -10,7 +10,7 @@
 </div>
 
 <p align="center">
-  <img src="demo.gif" alt="downloadcc Live Demo" width="100%" />
+  <img src="assets/demo.gif" alt="downloadcc Live Demo" width="100%" />
 </p>
 
 > [!IMPORTANT]
@@ -168,9 +168,10 @@ python downloadcc.py "Mr. Robot"
 
 ```
 downloadcc/
+├── assets/
+│   └── demo.gif                 - Demo preview animation
 ├── downloadcc.py                - Main interactive CLI entry point
 ├── search_engine.py             - TVmaze API + torrent indexer crawling engine
-├── demo.gif                     - Demo preview animation
 ├── installer.iss                - Inno Setup compiler configuration
 ├── MoviesAndShowsInstaller.exe  - Compiled standalone Windows installer
 ├── LICENSE                      - MIT License text
