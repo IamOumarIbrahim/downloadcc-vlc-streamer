@@ -260,7 +260,7 @@ def search_season_pack(show_title, season_num=None, max_season=None):
                         # Exclude single season packs
                         seasons_mentioned = set()
                         for s_val in range(1, max_season + 1):
-                            if re.search(rf'\b(season\s*{s_val}\b|s{s_val:02d}\b|s{s_val}\b)', name_lower):
+                            if re.search(rf'\b(season\s*{s_val}\b|{s_val}(?:st|nd|rd|th)\s*season\b|s{s_val:02d}\b|s{s_val}\b)', name_lower):
                                 seasons_mentioned.add(s_val)
                         if len(seasons_mentioned) == 1:
                             continue
@@ -282,6 +282,16 @@ def search_season_pack(show_title, season_num=None, max_season=None):
     if not valid_torrents:
         return None
         
+    has_seeded = any(t['seeders'] > 0 for t in valid_torrents)
+    if has_seeded:
+        has_healthy = any(t['seeders'] >= 2 for t in valid_torrents)
+        if has_healthy:
+            valid_torrents = [t for t in valid_torrents if t['seeders'] >= 2]
+        else:
+            valid_torrents = [t for t in valid_torrents if t['seeders'] > 0]
+    else:
+        return None
+
     for t in valid_torrents:
         name_lower = t['name'].lower()
         score = min(t['seeders'], 100)
@@ -295,6 +305,9 @@ def search_season_pack(show_title, season_num=None, max_season=None):
         elif '2160p' in name_lower or '4k' in name_lower:
             score -= 500
             
+        if 'remux' in name_lower or 'bdremux' in name_lower:
+            score -= 600
+            
         if any(codec in name_lower for codec in ['x265', 'h265', 'hevc', 'av1', '10bit', '10-bit']):
             score -= 500
             
@@ -307,7 +320,10 @@ def search_season_pack(show_title, season_num=None, max_season=None):
         t['score'] = score
         
     valid_torrents.sort(key=lambda x: (x['score'], x['seeders']), reverse=True)
-    return valid_torrents[0]
+    best = valid_torrents[0]
+    if best['score'] <= 0 and season_num is None:
+        return None
+    return best
 
 def log_status(item_id, msg, progress=None, speed=None, peers=None, eta=None):
     if item_id:
@@ -340,16 +356,28 @@ def download_torrent(info_hash, torrent_name, target_dir, staging_dir, item_id=N
         'enable_natpmp': True,
         'enable_dht': True,
         'enable_lsd': True,
+        'dht_bootstrap_nodes': 'router.bittorrent.com:6881,dht.transmissionbt.com:6881,router.utorrent.com:6881,dht.libtorrent.org:25401',
         'download_rate_limit': 0,
         'upload_rate_limit': 0,
         'connections_limit': 300
     })
     
+    trackers = [
+        "udp://tracker.opentrackr.org:1337/announce",
+        "udp://open.stealth.si:80/announce",
+        "udp://tracker.torrent.eu.org:451/announce",
+        "udp://tracker.openbittorrent.com:6969/announce",
+        "udp://open.demonii.com:1337/announce",
+        "udp://explodie.org:6969/announce",
+        "udp://exodus.desync.com:6969/announce",
+        "udp://tracker.moeking.me:6969/announce",
+        "http://tracker.openbittorrent.com:80/announce"
+    ]
+    tr_params = "".join(f"&tr={urllib.parse.quote(tr)}" for tr in trackers)
     magnet_link = (
         f"magnet:?xt=urn:btih:{info_hash}"
         f"&dn={urllib.parse.quote(torrent_name)}"
-        f"&tr=udp://tracker.opentrackr.org:1337/announce"
-        f"&tr=udp://tracker.coppersurfer.tk:6969/announce"
+        f"{tr_params}"
     )
     
     params = lt.parse_magnet_uri(magnet_link)
@@ -366,7 +394,7 @@ def download_torrent(info_hash, torrent_name, target_dir, staging_dir, item_id=N
         if not item_id:
             print(f"\rPeers: {s.num_peers} | State: fetching metadata...", end="", flush=True)
         log_status(item_id, "Fetching metadata", peers=s.num_peers, eta="Fetching Metadata")
-        if time.time() - meta_start > 60:
+        if time.time() - meta_start > 120:
             if not item_id:
                 print("\n\033[1;31m[!] Metadata fetch timed out (no seeders). Skipping...\033[0m")
             log_status(item_id, "Metadata Timeout")
@@ -680,6 +708,27 @@ def add_item_to_queue(query):
             new_item["torrent_name"] = torrent_pack['name']
             new_item["info_hash"] = torrent_pack['info_hash']
             new_item["staging_dir"] = os.path.join(dest_workspace, "staging_temp_" + new_item["id"])
+        elif target_season is None and seasons:
+            print(f"\033[1;34m[*] Checking individual season packs for all seasons...\033[0m")
+            found_season_packs = []
+            for s_num in seasons:
+                spack = search_season_pack(show_title, s_num)
+                if spack:
+                    found_season_packs.append({
+                        'season': s_num,
+                        'name': spack['name'],
+                        'info_hash': spack['info_hash']
+                    })
+            
+            if len(found_season_packs) == len(seasons):
+                new_item["season_packs"] = found_season_packs
+                new_item["torrent_name"] = f"{show_title} Complete (Seasons 1-{len(seasons)} Packs)"
+                new_item["info_hash"] = "multi_season_pack"
+            else:
+                target_eps = [ep for ep in episodes if target_season is None or ep['season'] == target_season]
+                new_item["episodes"] = target_eps
+                new_item["torrent_name"] = f"{show_title} (Individual Episodes)"
+                new_item["info_hash"] = "fallback"
         else:
             # Fallback to individual episodes
             target_eps = [ep for ep in episodes if target_season is None or ep['season'] == target_season]
@@ -807,12 +856,20 @@ def process_queue_loop():
                     eta = prog_info.get('eta', 'Unknown')
                     status_msg = prog_info.get('status_msg', 'Downloading')
                     
+                    item['progress'] = progress
+                    item['speed_mb'] = speed
+                    item['peers'] = peers
+                    item['eta'] = eta
+                    
                     status_lines.append(f"  \033[1;36m•\033[0m {title} - {status_str} (\033[1;33m{status_msg}\033[0m)")
                     status_lines.append(f"    Progress: {progress:.2f}% | Speed: {speed:.2f} MB/s | Peers: {peers} | ETA: {eta}")
                 elif status == 'queued':
                     status_lines.append(f"  \033[1;36m•\033[0m {title} - {status_str}")
                     
             status_lines.append("\033[1;30m" + "=" * 55 + "\033[0m")
+            
+            q_data['queue'] = queue_list
+            save_queue(q_data)
             
             for line in status_lines:
                 print(line)
@@ -872,6 +929,24 @@ def download_queue_item_thread(item):
             else:
                 all_success = False
                 
+        global_results[item_id] = all_success
+        return all_success
+
+    elif item.get('season_packs'):
+        season_packs = item.get('season_packs', [])
+        log_status(item_id, f"Processing show (0/{len(season_packs)} seasons)")
+        all_success = True
+        for idx, pack in enumerate(season_packs, 1):
+            s_num = pack['season']
+            staging_season = os.path.join(item['dest_workspace'], f"staging_temp_s_{s_num:02d}_{item_id}")
+            log_status(item_id, f"Downloading Season {s_num:02d} ({idx}/{len(season_packs)})")
+            success = download_torrent(pack['info_hash'], pack['name'], dest_dir, staging_season, item_id=item_id)
+            if success:
+                log_status(item_id, f"Organizing Season {s_num:02d}")
+                post_process_files(staging_season, dest_dir, is_movie=False, item_id=item_id)
+                log_status(item_id, f"Finished Season {s_num:02d} ({idx}/{len(season_packs)})")
+            else:
+                all_success = False
         global_results[item_id] = all_success
         return all_success
         
@@ -1199,7 +1274,25 @@ def run_vlc_retry():
 
 
 
+def print_banner():
+    try:
+        import pyfiglet
+        cols = shutil.get_terminal_size((120, 20)).columns
+        width = max(cols, 120)
+        banner = pyfiglet.figlet_format("downloadcc", font="3d-ascii", width=width)
+    except Exception:
+        banner = r""" ________  ________  ___       __   ________   ___       ________  ________  ________  ________  ________     
+|\   ___ \|\   __  \|\  \     |\  \|\   ___  \|\  \     |\   __  \|\   __  \|\   ___ \|\   ____\|\   ____\    
+\ \  \_|\ \ \  \|\  \ \  \    \ \  \ \  \\ \  \ \  \    \ \  \|\  \ \  \|\  \ \  \_|\ \ \  \___|\ \  \___|    
+ \ \  \ \\ \ \  \\\  \ \  \  __\ \  \ \  \\ \  \ \  \    \ \  \\\  \ \   __  \ \  \ \\ \ \  \    \ \  \       
+  \ \  \_\\ \ \  \\\  \ \  \|\__\_\  \ \  \\ \  \ \  \____\ \  \\\  \ \  \ \  \ \  \_\\ \ \  \____\ \  \____  
+   \ \_______\ \_______\ \____________\ \__\\ \__\ \_______\ \_______\ \__\ \__\ \_______\ \_______\ \_______\
+    \|_______|\|_______|\|____________|\|__| \|__|\|_______|\|_______|\|__|\|__|\|_______|\|_______|\|_______|
+"""
+    print(f"\033[1;36m{banner}\033[0m")
+
 def show_help():
+    print_banner()
     print(f"\n\033[1;35mdownloadcc (v{VERSION}) - Interactive Movies & TV Shows Downloader\033[0m")
     print("\033[1;30m" + "=" * 60 + "\033[0m")
     print("Usage: \033[1;36mdownloadcc [command] [args...]\033[0m\n")
@@ -1258,6 +1351,7 @@ def main():
             return
             
     # Default behavior: run search and interactive selection
+    print_banner()
     if len(args) == 0:
         query = input("\033[1;35mEnter the movie or TV show name to search: \033[0m").strip()
     else:

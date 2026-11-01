@@ -29,7 +29,7 @@ downloadcc automates title validation, episode sorting, torrent downloading, and
 ```bash
 git clone https://github.com/IamOumarIbrahim/downloadcc.git
 cd downloadcc
-pip install requests beautifulsoup4 libtorrent pyinstaller
+pip install requests beautifulsoup4 libtorrent pyinstaller pyfiglet
 ```
 
 ## Usage
