@@ -37,6 +37,7 @@ VERSION = "3.5"
 MAX_PARALLEL_DOWNLOADS = 3
 global_progress = {}
 global_results = {}
+global_errors = {}
 
 
 
@@ -56,21 +57,40 @@ def init_queue_dir():
         except Exception as e:
             print(f"Error initializing queue file: {e}")
 
+class QueueReadError(Exception):
+    pass
+
 def load_queue():
     init_queue_dir()
-    try:
-        with open(QUEUE_PATH, 'r') as f:
-            return json.load(f)
-    except:
-        return {"queue": []}
+    last_error = None
+    # Windows can briefly lock the file while another process replaces it.
+    for attempt in range(5):
+        try:
+            with open(QUEUE_PATH, 'r') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get('queue'), list):
+                return data
+            last_error = "unexpected file format"
+        except (OSError, ValueError) as e:
+            last_error = e
+        time.sleep(0.1)
+    # Never fall back to an empty queue: the next save would erase the real one.
+    raise QueueReadError(f"Could not read {QUEUE_PATH}: {last_error}. The file was left unchanged.")
 
 def save_queue(q_data):
     init_queue_dir()
     try:
-        temp_path = QUEUE_PATH + ".tmp"
+        temp_path = f"{QUEUE_PATH}.{os.getpid()}.tmp"
         with open(temp_path, 'w') as f:
             json.dump(q_data, f, indent=2)
-        os.replace(temp_path, QUEUE_PATH)
+        for attempt in range(5):
+            try:
+                os.replace(temp_path, QUEUE_PATH)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.1)
     except Exception as e:
         print(f"Error saving queue: {e}")
 
@@ -325,6 +345,13 @@ def search_season_pack(show_title, season_num=None, max_season=None):
         return None
     return best
 
+def record_error(item_id, msg):
+    if item_id:
+        global_errors.setdefault(item_id, []).append(msg)
+        log_status(item_id, msg)
+    else:
+        print(f"\033[1;31m[!] {msg}\033[0m")
+
 def log_status(item_id, msg, progress=None, speed=None, peers=None, eta=None):
     if item_id:
         if item_id not in global_progress:
@@ -438,7 +465,7 @@ def download_torrent(info_hash, torrent_name, target_dir, staging_dir, item_id=N
             if s.state == lt.torrent_status.downloading and speed == 0:
                 if stuck_start is None:
                     stuck_start = time.time()
-                elif time.time() - stuck_start > 60:
+                elif time.time() - stuck_start > 240:
                     if not item_id:
                         print("\n\033[1;31m[!] Download stuck with 0 speed for 60 seconds. Skipping...\033[0m")
                     log_status(item_id, "Stuck 0 Speed")
@@ -471,7 +498,35 @@ def download_torrent(info_hash, torrent_name, target_dir, staging_dir, item_id=N
     ses.remove_torrent(handle)
     return True
 
+def is_sample_file(file_path):
+    # Sample clips can share an episode's S01E01 name and must not replace it.
+    # Only the file's own label counts, so a title like "The Sample Show" is safe.
+    stem = os.path.splitext(os.path.basename(file_path))[0].lower()
+    parent_name = os.path.basename(os.path.dirname(file_path)).lower()
+    labelled_sample = parent_name == 'sample' or re.search(r'^sample([\W_]|$)|(^|[\W_])sample$', stem)
+    return bool(labelled_sample) and os.path.getsize(file_path) < 300 * 1024 * 1024
+
+def get_unused_path(file_path):
+    base, ext = os.path.splitext(file_path)
+    copy_number = 2
+    while os.path.exists(file_path):
+        file_path = f"{base} ({copy_number}){ext}"
+        copy_number += 1
+    return file_path
+
+def move_file(src_path, dest_path):
+    # Windows can hold a torrent's files open briefly after it is removed.
+    for attempt in range(3):
+        try:
+            shutil.move(src_path, dest_path)
+            return
+        except PermissionError:
+            if attempt == 2:
+                raise
+            time.sleep(2)
+
 def post_process_files(staging_dir, dest_dir, is_movie=False, item_id=None):
+    """Move videos to dest_dir. Returns False and keeps staging_dir if any video was not moved."""
     if not item_id:
         print(f"\n\033[1;34m[*] Sorting and renaming files to {dest_dir}...\033[0m")
     else:
@@ -482,11 +537,15 @@ def post_process_files(staging_dir, dest_dir, is_movie=False, item_id=None):
     pattern = re.compile(r'S(\d{2})E(\d{2})', re.IGNORECASE)
     
     renamed = 0
+    already_present = 0
+    move_errors = []
     for root, dirs, files in os.walk(staging_dir):
         for file in files:
             ext = os.path.splitext(file)[1].lower()
             if ext in video_extensions:
                 src_path = os.path.join(root, file)
+                if is_sample_file(src_path):
+                    continue
                 if is_movie:
                     new_filename = file
                     dest_path = os.path.join(dest_dir, new_filename)
@@ -503,25 +562,34 @@ def post_process_files(staging_dir, dest_dir, is_movie=False, item_id=None):
                     else:
                         dest_path = os.path.join(dest_dir, file)
                         
-                if not item_id:
-                    print(f"  -> Moving: '{file}' to '{os.path.basename(dest_path)}'")
-                if os.path.exists(dest_path):
-                    try: os.remove(dest_path)
-                    except: pass
                 try:
-                    shutil.move(src_path, dest_path)
+                    if os.path.exists(dest_path):
+                        if os.path.getsize(dest_path) == os.path.getsize(src_path):
+                            already_present += 1
+                            continue
+                        dest_path = get_unused_path(dest_path)
+                    if not item_id:
+                        print(f"  -> Moving: '{file}' to '{os.path.basename(dest_path)}'")
+                    move_file(src_path, dest_path)
                     renamed += 1
                 except Exception as e:
+                    move_errors.append(f"{file}: {e}")
                     if not item_id:
                         print(f"  [!] Error moving file: {e}")
-                    
+
+    if move_errors or renamed + already_present == 0:
+        problem = f"{len(move_errors)} file(s) could not be moved" if move_errors else "No video files were found"
+        record_error(item_id, f"{problem}. Files kept in: {staging_dir}")
+        return False
+
     # Clean staging
     try:
         shutil.rmtree(staging_dir)
-    except:
+    except Exception:
         pass
     if not item_id:
         print(f"\033[1;32m[+] Finished organizing {renamed} files.\033[0m")
+    return True
 
 def prompt_output_path():
     print(f"\n\033[1;35m[?] Where would you like to save the files?\033[0m")
@@ -569,8 +637,30 @@ def show_queue():
             print(f"  \033[1;36m[{idx}]\033[0m {title} - {status_str}")
             print(f"      File: {torrent_name}")
 
+        for error in item.get('errors', []):
+            print(f"      \033[1;31mProblem: {error}\033[0m")
+
 def clear_queue():
+    if is_downloader_running():
+        print("\033[1;31mDownloads are running. Press Ctrl+C in that window before clearing the queue.\033[0m")
+        return
+
     q_data = load_queue()
+    item_count = len(q_data['queue'])
+    if item_count == 0:
+        print("\033[1;33mThe download queue is already empty.\033[0m")
+        return
+
+    print(f"\033[1;33mThis removes all {item_count} item(s) from the queue. Downloaded files are not deleted.\033[0m")
+    print("\033[1;30mLooking for a title called 'clear'? Use: downloadcc add clear\033[0m")
+    try:
+        answer = input("Type y to clear the queue: ").strip().lower()
+    except EOFError:
+        answer = ''
+    if answer not in ['y', 'yes']:
+        print("\033[1;33mCancelled. The queue was not changed.\033[0m")
+        return
+
     q_data['queue'] = []
     save_queue(q_data)
     print("\033[1;32m[+] Download queue cleared successfully.\033[0m")
@@ -771,6 +861,7 @@ def process_queue_loop():
         
     global_progress.clear()
     global_results.clear()
+    global_errors.clear()
     active_threads = {} # item_id -> threading.Thread
     last_lines_printed = 0
     
@@ -788,6 +879,8 @@ def process_queue_loop():
                     for item in queue_list:
                         if item['id'] == item_id:
                             item['status'] = 'completed' if success else 'failed'
+                            if item_id in global_errors:
+                                item['errors'] = global_errors[item_id]
                             break
                             
             if finished_ids:
@@ -799,6 +892,8 @@ def process_queue_loop():
                         del global_progress[item_id]
                     if item_id in global_results:
                         del global_results[item_id]
+                    if item_id in global_errors:
+                        del global_errors[item_id]
             
             # 2. Start new downloads in parallel
             q_data = load_queue()
@@ -917,13 +1012,15 @@ def download_queue_item_thread(item):
             ep_torrent = search_engine.find_best_episode_torrent(item['title'], ep_season, ep_num, imdb_id=item.get('imdb_id'))
             
             if ep_torrent:
-                staging_ep = os.path.join(item['dest_workspace'], f"staging_temp_ep_{ep_season:02d}_{ep_num:02d}")
+                staging_ep = os.path.join(item['dest_workspace'], f"staging_temp_ep_{ep_season:02d}_{ep_num:02d}_{item_id}")
                 log_status(item_id, f"Downloading S{ep_season:02d}E{ep_num:02d}")
                 success = download_torrent(ep_torrent['info_hash'], ep_torrent['name'], dest_dir, staging_ep, item_id=item_id)
                 if success:
                     log_status(item_id, f"Organizing S{ep_season:02d}E{ep_num:02d}")
-                    post_process_files(staging_ep, dest_dir, is_movie=False, item_id=item_id)
-                    log_status(item_id, f"Finished S{ep_season:02d}E{ep_num:02d} ({idx}/{len(episodes)} episodes)")
+                    if post_process_files(staging_ep, dest_dir, is_movie=False, item_id=item_id):
+                        log_status(item_id, f"Finished S{ep_season:02d}E{ep_num:02d} ({idx}/{len(episodes)} episodes)")
+                    else:
+                        all_success = False
                 else:
                     all_success = False
             else:
@@ -943,8 +1040,10 @@ def download_queue_item_thread(item):
             success = download_torrent(pack['info_hash'], pack['name'], dest_dir, staging_season, item_id=item_id)
             if success:
                 log_status(item_id, f"Organizing Season {s_num:02d}")
-                post_process_files(staging_season, dest_dir, is_movie=False, item_id=item_id)
-                log_status(item_id, f"Finished Season {s_num:02d} ({idx}/{len(season_packs)})")
+                if post_process_files(staging_season, dest_dir, is_movie=False, item_id=item_id):
+                    log_status(item_id, f"Finished Season {s_num:02d} ({idx}/{len(season_packs)})")
+                else:
+                    all_success = False
             else:
                 all_success = False
         global_results[item_id] = all_success
@@ -958,8 +1057,9 @@ def download_queue_item_thread(item):
         success = download_torrent(info_hash, torrent_name, dest_dir, staging_dir, item_id=item_id)
         if success:
             log_status(item_id, "Organizing files")
-            post_process_files(staging_dir, dest_dir, is_movie=is_movie, item_id=item_id)
-            log_status(item_id, "Finished")
+            success = post_process_files(staging_dir, dest_dir, is_movie=is_movie, item_id=item_id)
+            if success:
+                log_status(item_id, "Finished")
         global_results[item_id] = success
         return success
 
@@ -1300,13 +1400,15 @@ def show_help():
     print("  \033[1;32mdownloadcc\033[0m                           - Launch search and interactive downloader.")
     print("  \033[1;32mdownloadcc \"Query\"\033[0m                   - Search and select a show/movie to download immediately.")
     print("  \033[1;32mdownloadcc queue\033[0m                     - View active download status and all items in the queue.")
+    print("  \033[1;32mdownloadcc start\033[0m                     - Process and start downloading pending queue items.")
     print("  \033[1;32mdownloadcc add \"Query\"\033[0m               - Search and add a new item directly to the background queue.")
     print("  \033[1;32mdownloadcc remove <number>\033[0m           - Remove an item from the queue list by its index number.")
-    print("  \033[1;32mdownloadcc clear\033[0m                     - Clear all pending items from the download queue.")
+    print("  \033[1;32mdownloadcc clear\033[0m                     - Remove every item from the queue (asks first).")
     print("  \033[1;32mdownloadcc vlc [\"Target\"]\033[0m            - Upload a file/folder wirelessly to VLC (iPad or iPhone).")
     print("  \033[1;32mdownloadcc vlc retry\033[0m                 - Re-upload files that failed in the last batch.")
 
     print("  \033[1;32mdownloadcc help\033[0m                      - Show this help menu.")
+    print("\nCommands are lowercase. To search for a title that matches one, use: \033[1;36mdownloadcc add clear\033[0m")
     print("\033[1;30m" + "=" * 60 + "\033[0m")
 
 def main():
@@ -1315,11 +1417,17 @@ def main():
     args = sys.argv[1:]
     
     if len(args) > 0:
-        cmd = args[0].lower()
-        if cmd == 'queue':
+        # Commands are lowercase, and those without arguments must stand alone,
+        # so titles such as "Clear" or "run lola run" reach the search instead.
+        cmd = args[0]
+        is_standalone = len(args) == 1
+        if cmd == 'queue' and is_standalone:
             show_queue()
             return
-        elif cmd == 'clear':
+        elif cmd in ['start', 'run'] and is_standalone:
+            process_queue_loop()
+            return
+        elif cmd == 'clear' and is_standalone:
             clear_queue()
             return
         elif cmd == 'remove':
@@ -1327,7 +1435,7 @@ def main():
                 print("\033[1;31mError: Please specify the item number to remove.\033[0m")
                 print("Usage: downloadcc remove <number>")
                 return
-            remove_queue_item(args[1])
+            remove_queue_item(" ".join(args[1:]))
             return
         elif cmd == 'add':
             if len(args) < 2:
@@ -1346,7 +1454,7 @@ def main():
                 run_vlc_upload(target_name)
             return
 
-        elif cmd in ['help', '--help', '-h']:
+        elif cmd in ['help', '--help', '-h'] and is_standalone:
             show_help()
             return
             
@@ -1364,4 +1472,8 @@ def main():
     add_item_to_queue(query)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except QueueReadError as e:
+        print(f"\033[1;31mError: {e}\033[0m")
+        sys.exit(1)

@@ -95,7 +95,7 @@ def query_api(url, headers=None):
     
     try:
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=25) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception:
         return None
@@ -579,6 +579,7 @@ def parse_tpb_html(html_content):
 
 def search_via_proxies(query_str):
     proxies = [
+        "https://pirateproxy.live/search/{query}/1/99/0",
         "https://tpb.party/search/{query}/1/99/0",
         "https://thepiratebay.zone/search/{query}/1/99/0",
         "https://tpb.wtf/search/{query}/1/99/0"
@@ -590,7 +591,7 @@ def search_via_proxies(query_str):
         url = proxy_template.format(query=encoded_query)
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:
                 html_content = response.read().decode('utf-8')
                 results = parse_tpb_html(html_content)
                 if results:
